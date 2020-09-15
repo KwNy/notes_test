@@ -1,0 +1,1275 @@
+## JASMINE testing 
+
+FIXTURES
+As mentioned earlier, a unit test has three parts: arrange, act, and assert. The arrange part of unit tests can be repetitive as multiple test cases often require the same setup. Jasmine provides fixtures to help reduce the amount of repetition in your score.
+
+Following are the four fixtures:
+
+beforeAll() – runs before all specs in describe
+afterAll() – runs after all specs in describe per test fixtures
+beforeEach() – runs before each spec in describe
+afterEach() – runs after each spec in describe
+The fixtures execute before and after a spec or a group of specs as scoped with their describe block.
+
+MATCHERS
+In the assert part of a unit test, we need to let Jasmine know whether a spec passed or failed. We can do so by writing an assertion. There are two kinds of assertions:
+
+fail('message') – this explicitly fails a spec
+expect() – given a matcher, this dynamically asserts if the expected outcome matches the actual outcome
+The expect assertion requires matchers to determine the outcome of a test. The combination of expect and matcher is meant to read like a sentence. Following are common matchers that you may use:
+
+Jasmine Matchers
+expect(expected).toBe(actual)
+                .toEqual(actual)
+                .toBeDefined()
+                .toBeFalsy()
+                .toThrow(exception)
+                .nothing()
+For the full extent of Jasmine matchers, see https://jasmine.github.io/api/edge/matchers.html.
+
+Other libraries with richer features exist, such as Jest, Mocha, or testdouble.js. However, when getting started with a new framework like Angular, it's important to keep your toolset minimal. Sticking to defaults is a good idea.
+
+Additionally, Jasmine provides spies, which support stubbing and mocking, with the spyOn function. We are going to cover these test doubles in more detail later in the chapter.
+
+
+## ON GETTING THE BALANCE RIGHT BETWEEN DIFFERENT TYPES OF TEST
+Start out by being pragmatic
+Spending a long time agonising about what kinds of test to write is a great way to prevaricate. Better to start by writing whichever type of test occurs to you first, and change it later if you need to. Learn by doing.
+
+Focus on what you want from your tests
+Your objectives are correctness, good design, and fast feedback cycles. Different types of test will help you achieve each of these in different measures. Table 26-1 has some good questions to ask yourself.
+
+Architecture matters
+Your architecture to some extent dictates the types of tests that you need. The more you can separate your business logic from your external dependencies, and the more modular your code, the closer you’ll get to a nice balance between unit tests, integration tests and end-to-end tests.
+
+
+Test doubles
+Only the code in the CUT should be exercised. In the case of the CurrentWeatherComponent, we need to ensure that the service code is not executed. For this reason, you should never provide the actual implementation of the service.
+
+We need to go over two types of test doubles:
+
+Fakes
+Mocks, stubs, or spies
+In general, it is easier to reason about fakes, so we will start with that. Once you're comfortable with unit testing and your existing set of tests are in working order, I highly recommend switching over to exclusively using mocks, as it'll make your tests more robust, efficient, and maintainable.
+
+FAKES
+A fake is an alternative, simplified implementation of an existing class. It's like a fake service, where no actual HTTP calls are made, but your service returns pre-baked responses. During unit testing, a fake is instantiated and is used like the real class. In the previous section, we used HttpClientTestingModule, which is a fake HttpClient. Our custom service is WeatherService, so we must provide our implementation of a test double.
+
+We create a test double by creating a fake of the service. Since the fake of the WeatherService is used in tests for multiple components, your implementation should be in a separate file. For the sake of the maintainability and discoverability of your codebase, one class per file is a good rule of thumb to follow. Keeping classes in separate files saves you from committing certain coding sins, like mistakenly creating or sharing global state or standalone functions between two classes, keeping your code decoupled in the process.
+
+We also need to ensure that APIs for the actual implementation and the test double don't go out of sync over time. We can accomplish this by creating an interface for the service.
+
+Add IWeatherService to weather.service.ts, as shown:
+src/app/weather/weather.service.ts
+export interface IWeatherService {
+  getCurrentWeather(
+  city: string, 
+  country: string
+  ): Observable<ICurrentWeather> 
+}
+Update WeatherService so that it implements the new interface:
+src/app/weather/weather.service.ts
+export class WeatherService implements IWeatherService
+Create a new file weather/weather.service.fake.ts
+Implement a basic fake in weather.service.fake.ts, as follows:
+src/app/weather/weather.service.fake.ts
+import { Observable, of } from 'rxjs'
+import { IWeatherService } from './weather.service'
+import { ICurrentWeather } from '../interfaces'
+export const fakeWeather: ICurrentWeather = {
+  city: 'Bethesda',
+  country: 'US',
+  date: 1485789600,
+  image: '',
+  temperature: 280.32,
+  description: 'light intensity drizzle',
+}
+export class WeatherServiceFake implements IWeatherService {
+  public getCurrentWeather(
+    city: string,
+    country: string): Observable<ICurrentWeather> { 
+      return of(fakeWeather)
+  }
+}
+We're leveraging the existing ICurrentWeather interface that our fake data has correctly shaped, but we must also turn it into an Observable. This is easily achieved using of, which creates an observable sequence, given the provided arguments.
+
+Now you're ready to provide the fake to AppComponent and CurrentWeatherComponent.
+
+Update the provider in current-weather.component.spec.ts to use WeatherServiceFake so that the fake is used instead of the actual service:
+src/app/current-weather/current-weather.component.spec.ts
+  ...
+  beforeEach( 
+    async(() => {
+      TestBed.configureTestingModule({
+        ...
+        providers: [{
+          provide: WeatherService, useClass: WeatherServiceFake
+        }],
+        ...
+Note that this alternate implementation is provided under a different file named current-weather.component.fake.spec, part of the sub-folder projects/ch4 on GitHub.
+
+Remove HttpClientTestingModule from the imports, since it is no longer needed
+As your services and components get more complicated, it's easy to provide an incomplete or inadequate test double. You may see errors such as NetworkError: Failed to execute 'send' on 'XMLHttpRequest', Can't resolve all parameters, or [object ErrorEvent] thrown. In case of the latter error, click on the Debug button in Karma to discover the view error details, which may look like Timeout - Async callback was not invoked within timeout specified by jasmine. Unit tests are designed to run in milliseconds, so it should be impossible to actually hit the default 5-second timeout. The issue is almost always with the test setup or configuration.
+
+Verify that all tests are passing
+With fakes, we were able to somewhat reduce test complexity and improve isolation. We can do much better with mocks, stubs, and spies.
+
+MOCKS, STUBS, AND SPIES
+A mock, stub, or spy does not contain any implementation whatsoever. Mocks are configured in the unit test file to respond to specific function calls with a set of responses that can be made to vary from test to test with ease.
+
+Earlier in the Declarations section, we discussed the need to declare CurrentWeatherComponent in app.component.spec.ts to resolve the not a known element warning. If we declare the real CurrentWeatherComponent, then the AppComponent test configuration becomes overly complicated with a lot of configuration elements, because we must resolve the dependency tree for the child component, including WeatherService and HttpClient. In addition, creating a whole fake service just to provide fake weather data is overkill and is not a flexible solution. What if we wanted to test different service responses, given different inputs? We would have to start introducing logic into our fake service, and before you know it, you're dealing with two separate implementations of the WeatherService.
+
+An alternative to creating a fake would be to create an empty object that parades as the real thing but contains no implementation. These objects are called mocks. We will leverage two different techniques to create a mock component and a mock service below.
+
+Mock components
+If we were to provide a CurrentWeatherComponent in app.component.spec.ts, we could resolve the not a known element warning and not have to worry about all the components and services that CurrentWeatherComponent depends on.
+
+If you were to implement it by hand, a mock component would look like this:
+
+@Component({
+  selector: 'app-current-weather',
+  template: ``,
+})
+class MockCurrentWeatherComponent {}
+However, this can get tedious really fast, which is why I published a unit test helper library called angular-unit-test-helper to make it easier to mock a component. With the library, you can just replace the component in the declaration with this function call:
+
+createComponentMock('CurrentWeatherComponent')
+Let's update app.component.spec.ts to use mocked components:
+
+Execute npm i -D angular-unit-test-helper
+Update AppComponent with the mocked components:
+src/app/app.component.spec.ts
+import { createComponentMock } from 'angular-unit-test-helper'
+  TestBed.configureTestingModule({
+    declarations: [ ...,
+      createComponentMock('CurrentWeatherComponent')
+    ],
+    ...
+  })
+Remove the providers property altogether
+Clean up unused imports
+Observe that the unit test file remains lean and the warning is resolved. angular-unit-test-helper infers that CurrentWeatherComponent represents an HTML tag like <app-current-weather> and provides it in the window object of the browser. The createComponentMock function then properly decorates the empty class CurrentWeatherComponent by assigning the selector 'app-current-weather' and an empty template. TestBed is then able to resolve <app-current-weather> as this mocked component. createComponentMock also allows you to provide a custom selector or a fake template that you can pass depending on your needs. This is a solution that scales, cutting imports by more than half and adhering to FIRST principles.
+
+The concept of mocks extends to all kinds of objects we can define, including Angular services. By mocking a service, we don't have to worry about any dependencies that may be injected into that service.
+
+Let's see how we can mock a service.
+
+Mock services
+Let's write two new unit tests for CurrentWeatherComponent to demonstrate the value of mocking a service instead of implementing a fake for it. Mocks allow us to create an empty object and give us the option to supply only the functions that may be needed for a test. We can then stub out the return values of these functions per test or spy on them to see whether our code called them or not. Spying is especially useful if the function in question has no return value. We need to set up our spy in the arrange part of our spec.
+
+Let's start by creating a spy WeatherService, using jasmine.createSpyObj, as shown:
+src/app/current-weather/current-weather.component.spec.ts
+import {
+  ComponentFixture,
+  TestBed,
+  async
+} from '@angular/core/testing'
+import { injectSpy } from 'angular-unit-test-helper'
+import { WeatherService } from '../weather/weather.service'
+import {
+  CurrentWeatherComponent
+} from './current-weather.component'
+describe('CurrentWeatherComponent', () => {
+  ...
+  let weatherServiceMock: jasmine.SpyObj<WeatherService>
+  beforeEach(async(() => {
+    const weatherServiceSpy =
+      jasmine.createSpyObj(
+        'WeatherService',
+        ['getCurrentWeather']
+      )
+    
+    TestBed.configureTestingModule({ ... })
+  })
+Provide weatherServiceSpy as the value of WeatherService with useValue
+Finally, get the injected instance from TestBed and assign the value to weatherServiceMock, using the injectSpy method from angular-unit-test-helper as shown:
+src/app/current-weather/current-weather.component.spec.ts
+    beforeEach(async(() => { 
+      ...
+      TestBed.configureTestingModule({
+      ...,
+       providers: [{
+         provide: WeatherService, useValue: weatherServiceSpy
+       }]
+    }).compileComponents()
+    weatherServiceMock = injectSpy(WeatherService)
+}
+Note that injectSpy is a shorthand for TestBed.inject(WeatherService) as any.
+
+In the preceding example, we have a mocked version of WeatherService, where declared that it has a function named getCurrentWeather. However, note that you're now getting an error:
+
+TypeError: Cannot read property 'subscribe' of undefined
+This is because getCurrentWeather is not returning an observable. Using weatherServiceMock, we can spy on whether getCurrentWeather is being called or not, but also stub out its return value depending on the test.
+
+In order to manipulate the return value of getCurrentWeather, we need to update the should create test to reflect the arrange, act, and assert structure. To do this, we need to move fixture.detectChanges() from the second beforeEach, so we can control its execution order to be after the arrange part.
+
+src/app/current-weather/current-weather.component.spec.ts
+  import { of } from 'rxjs'
+  ...
+  beforeEach(() => {
+    fixture = TestBed.createComponent(CurrentWeatherComponent)
+    component = fixture.componentInstance
+  })
+  it('should create', () => {
+    // Arrange
+    weatherServiceMock.getCurrentWeather.and.returnValue(of())
+    // Act
+    fixture.detectChanges() // triggers ngOnInit
+    // Assert
+    expect(component).toBeTruthy()
+  })
+In the arrange part, we configure that getCurrentWeather should return an empty observable using the RxJS\of function. In the act part, we trigger TestBed's detectChanges function, which triggers lifecycle events like ngOnInit. Since the code we're testing is in ngOnInit, this is the right thing to execute. Finally, in the assert part, we confirm our assertion that the component was successfully created.
+
+In this next test, we can verify that the getCurrentWeather function is being called exactly once:
+
+src/app/current-weather/current-weather.component.spec.ts
+  it('should get currentWeather from weatherService', () => {
+    // Arrange
+    weatherServiceMock.getCurrentWeather.and.returnValue(of())
+    // Act
+    fixture.detectChanges() // triggers ngOnInit()
+    // Assert
+    expect(weatherServiceMock.getCurrentWeather)
+      .toHaveBeenCalledTimes(1)
+  })
+And finally, we can test out the fact that the values that are being returned are correctly assigned in the component class, but also that they are correctly rendered on the template:
+
+src/app/current-weather/current-weather.component.spec.ts
+import { By } from '@angular/platform-browser'
+import { fakeWeather } from '../weather/weather.service.fake'
+...
+  it('should eagerly load currentWeather in Bethesda from weatherService', () => {
+    // Arrange
+    weatherServiceMock.getCurrentWeather
+      .and.returnValue(of(fakeWeather))
+    // Act
+    fixture.detectChanges() // triggers ngOnInit()
+    // Assert
+    expect(component.current).toBeDefined()
+    expect(component.current.city).toEqual('Bethesda')
+    expect(component.current.temperature).toEqual(280.32)
+    // Assert on DOM
+    const debugEl = fixture.debugElement
+    const titleEl: HTMLElement = debugEl.query(By.css('span'))
+      .nativeElement
+    expect(titleEl.textContent).toContain('Bethesda')
+  })
+In the preceding example, you can see that we're providing a fakeWeather object, where the city name is Bethesda. We are then able to assert that the current property has the correct city, and also that the <div> element with class=mat-title contains the text Bethesda.
+
+You should now have seven passing tests:
+
+TOTAL: 7 SUCCESS
+Using mocks, stubs, and spies, we can rapidly test permutations of what outside dependencies can and cannot return and we are able to verify our assertions on the code that resides in the component or service class by observing the DOM.
+
+To learn more about mocks, stubbing, and spies, refer to https://jasmine.github.io. Also, I've found Jasmine 2 Spy Cheat Sheet by Dave Ceddia, located at https://daveceddia.com/jasmine-2-spy-cheat-sheet, to be a useful resource.
+
+In general, your unit tests should be asserting one or two things at most. To achieve adequate unit test coverage, you should focus on testing the correctness of functions that contain business logic: usually wherever you see an if or switch statement.
+
+To write unit-testable code, be sure to adhere to the Single Responsibility and Open/Closed principles of the SOLID principles.
+
+Check out the ng-tester library that my colleague Brendan Sawyer created at https://www.npmjs.com/package/ng-tester. It creates opinionated spec files for your Angular components that leverage angular-unit-test-helper to assist with mocking. In addition, the library demonstrates how to mock dependencies and create tests without using TestBed.
+
+You may install the library npm install -D ng-tester and create a unit test with the command npx ng generate ng-tester:unit.
+
+In addition to unit tests, the Angular CLI also generates and configures e2e tests for your application. Next, let's learn about e2e tests.
+
+Links: 
+
+https://github.com/testdouble/contributing-tests/wiki/Test-Driven-Development
+
+
+
+## https://learning.oreilly.com/library/view/mockito-cookbook/9781783982745/ch01.html
+
+You may ask yourself the question, "Why should I even bother to use Mockito in the first place?" Out of many choices, Mockito offers the following key features:
+
+There is no expectation phase for Mockito—you can either stub or verify the mock's behavior
+You are able to mock both interfaces and classes
+You can produce little boilerplate code while working with Mockito by means of annotations
+You can easily verify or stub with intuitive argument matchers
+Before diving into Mockito as such, one has to understand the concept behind System Under Test (SUT) and test doubles. We will base our work on what Gerard Meszaros has defined in the xUnit Patterns (http://xunitpatterns.com/Mocks,%20Fakes,%20Stubs%20and%20Dummies.html).
+
+SUT (http://xunitpatterns.com/SUT.html) describes the system that we are testing. It doesn't have to necessarily signify a class or any part of the application that we are testing or even the whole application as such.
+
+As for test doubles (http://www.martinfowler.com/bliki/TestDouble.html), it's an object that is used only for testing purposes, instead of a real object. Let's take a look at different types of test doubles:
+
+Dummy: This is an object that is used only for the code to compile—it doesn't have any business logic (for example, an object passed as a parameter to a method)
+Fake: This is an object that has an implementation but it's not production ready (for example, using an in-memory database instead of communicating with a standalone one)
+Stub: This is an object that has predefined answers to method executions made during the test
+Mock: This is an object that has predefined answers to method executions made during the test and has recorded expectations of these executions
+Spy: These are objects that are similar to stubs, but they additionally record how they were executed (for example, a service that holds a record of the number of sent messages)
+
+
+
+## Rails 5 Test Prescriptions - fragment 
+
+Using testdouble.js
+testdouble.js is a test-double library written by Justin Searls and his crew at a company called Test Double. The library is very strict about the kinds of test doubles it helps you create in service of a specific pattern of testing and program design. Searls explains that in the documentation.[41]
+
+For our purposes, the most significant part of the testdouble.js API as compared to RSpec’s mock package is that testdouble.js makes it difficult to impossible to stub only one or two methods of an exiting object. That means it’s hard to create a partial test double. In testdouble.js, the idea is that it is generally safer and clearer to replace an entire object with a test double rather than have an object exist as part test double, part real object. I can’t argue with the theory, though if you’re used to RSpec’s looser test double style, working with testdouble.js requires some adjustment. As you’ll see, the design of the resulting code is to some extent determined by drawing a boundary around logic that is easy to stub together. This is by design; the test is being used to determine the logical structure of the code.
+
+Using testdouble.js happens in three steps: declaring the double, defining its behavior with the td.when method, and optionally verifying its usage after the test has run with the td.verify. Please note that this is not a complete guide to testdouble.js; you’re invited to check out the very complete documentation online.[42]
+
+CREATING TEST DOUBLES
+The testdouble.js library has three methods for creating doubles, which are analogous to RSpec’s double method. Which one you use largely depends on whether your JavaScript code is primarily structured around functions, objects, or classes.
+
+If you’re trying to replace a bare function, you can use the td.function method. If you call it with no arguments, the result is a bare function suitable for passing as a dependency to code under test.
+
+More frequently, you may want to replace an entire object or class instance. To replace an object, use the td.object function. There are two ways to use td.object. If you don’t have a real object but you know the interface of the object you want, you can call td.object with an array of strings, which represent properties of the object that are functions. You then get a test-double object where each of those strings is a test double-fake function, like this:
+
+​ 	​const​ fake = td.object([​"name"​, ​"weight"​])
+​ 	fake.name
+​ 	fake.weight
+But using td.object with an array of strings has a problem that might be familiar from the discussion of RSpec doubles. If the “real” object’s attributes change but the td.object arguments don’t, you could have a passing test even though the underlying code is broken. A workaround is to pass td.object an existing object instead:
+
+​ 	​const​ real = {
+​ 	  name: ​function​() {}
+​ 	  weight: ​function​() {}
+​ 	  size: ​"small"​
+​ 	 }
+​ 	 fake = td.object(real)
+When used on a real object, td.object replaces all the functions with test-double functions but doesn’t touch any property of the object that is not a function. So, fake.name is a test-double function, but td.size is still “small.” The advantage here is that the real definition presumably happens somewhere in your code, and if that definition changes, the test-double object also changes, somewhat analogous to an RSpec verifying double.
+
+In this case, the code uses the classes defined in the ES6 version of JavaScript rather than a plain JavaScript object.[43] For that, testdouble.js provides the td.constructor function. As with td.object, td.constructor has two forms: one that wraps the properties of an existing class and one that can be set free-form. The previous code sample uses the wrapper version, which takes the class object as the argument td.constructor(ProjectLoader). The return value is a stubbed constructor that you can use to instantiate objects whose methods are covered by testdouble.js:
+
+​ 	​const​ FakeLoader = td.​constructor​(ProjectLoader)
+​ 	project.projectLoader = ​new​ FakeLoader()
+Technically the argument to td.constructor is not a class name, but a constructor function (which means you could use td.constructor with pre-ES6 code if you were writing pre-ES6 class-like structures). If that sentence doesn’t make sense to you, don’t worry; the distinction isn’t very important.
+
+You can also pass an array of string function names to td.constructor, in which case you get a constructor that can create objects that respond to those function names. For the pre-ES6 crowd, it’s creating an object with fake functions in its prototype object.
+
+No matter which way you build your test-double structure, you’ll eventually wind up with a function or method that is controlled by testdouble.js. Next, you need to specify the behavior of those fake functions.
+
+SPECIFYING TEST DOUBLE BEHAVIOR
+Once you have a testdouble.js function, you need to specify some behavior for it, analogous to the way RSpec’s test doubles use allow and expect with chained methods like to_receive.
+
+In testdouble.js, you add behavior with the when method, and the API to it is a little unusual. Here’s a basic usage:
+
+​ 	​const​ fake = td.object[​"remoteInit"​]
+​ 	td.when(fake.remoteInit(1)).thenReturn(7)
+There are two parts to this when invocation: the call to when itself, and then the chained method afterward that defines the behavior.
+
+The argument to when is meant to be the entire call to the test double, potentially with arguments specified. It’s a demonstration of the call that the test expects to be made by the code under test.
+
+In this case, you expect the test to make the call fake.remoteInit(1) to cause the test double to return the value 7. If you make the call fake.remoteInit(2)—changing the argument—the specified behavior is not triggered and the result of that call is undefined.
+
+This interface to creating test-double behavior has the huge advantage of making the most common action—returning a value when a function is called—very simple. The library does get more complicated from there.
+
+First, if you want to access an instance method of a test double created with td.constructor, the nature of JavaScript objects requires you to invoke that method via the prototype object, as in td.when(FakeLoader.prototype.load()). As in RSpec, you can pass in argument matchers in place of literal arguments if you want the test double to match against a wider array of behavior. (You can see the full list of stubbing behavior online.[44]) Here are some of the most useful ones:
+
+anything, as in td.when(fake.remoteInit(anything())), which matches, well … anything. You do have to match the number of arguments, so in this case fake.remoteInit(12) matches, but fake.remoteInit(12, 13) does not.
+contains(<something>) matches if the argument to the eventual test double is contained by the argument to contains. The argument can be a string, a regular expression, an array, or an object.
+
+isA() matches based on type: td.when(fake.remoteInit(isA(Number))). This works for built-in types, ES6 classes, or older-style objects that define constructors.
+
+not() matches if a particular value doesn’t match, as in td.when(fake.remoteInit (not(12))).
+
+If you specify multiple potential matches for a value, the last one defined wins. If I define this:
+
+​ 	td.when(fake.remoteInit(anything())).thenReturn(1)
+​ 	td.when(fake.remoteInit(isA(Number))).thenReturn(2)
+​ 	td.when(fake.remoteInit(1)).thenReturn(3)
+then fake.remoteInit(1) returns 3, fake.remoteInit(2) returns 2 (because 2 is a number but it isn’t 1), and fake.remoteInit("Steve") returns 1 (because the only definition that matches is the first one).
+
+You can also trigger different behaviors, typically to allow for different kinds of JavaScript asynchronous behavior. So if the method under test is expected to return a JavaScript promise, you can chain the test double with thenResolve to trigger the positive, with then to branch off the promise, or with thenReject to trigger the negative or catch side.
+
+More generic asynchronous behavior can be captured with thenCallback, which assumes by default that the last argument to the function under test is itself a callback function, and which then invokes the callback function with whatever arguments you pass to thenCallback. You can also simulate an error condition with thenThrow, which expects an Error object.
+
+Here’s the when line from your original test:
+
+​ 	td.when(FakeLoader.prototype.load()).thenResolve(input)
+Now you can trace all of this. Here you’re saying that FakeLoader is a class with an instance method load. If load is called with no arguments, you’d expect it to return a promise and immediately invoke the positive result of that promise.
+
+To see what that does in practice, let’s look at the passing code in Project and ProjectLoader:
+
+js_jasmine/02/app/javascript/packs/project.js
+​ 	​import​ {ProjectLoader} ​from​ ​"../../../app/javascript/packs/project_loader.js"​
+​ 	​import​ {Task} ​from​ ​"../../../app/javascript/packs/task.js"​
+​ 	​import​ {ProjectTable} ​from​ ​"../../../app/javascript/packs/project_table.js"​
+​ 	
+​ 	
+​ 	​export​ ​class​ Project {
+​ 	  ​constructor​(id) {
+​ 	    ​this​.tasks = []
+​ 	    ​this​.id = id
+​ 	    ​this​.loader = ​new​ ProjectLoader(​this​)
+​ 	  }
+​ 	
+​ 	  load() {
+​ 	    ​return​ ​this​.loader.load().then(data => ​this​.loadFromData(data))
+​ 	  }
+​ 	
+​ 	  loadFromData(data) {
+​ 	    ​this​.name = data.project.name
+​ 	    data.project.tasks.forEach(taskData => {
+​ 	      ​this​.appendTask(​new​ Task(
+​ 	        taskData.title, taskData.size, taskData.project_order))
+​ 	    })
+​ 	    ​return​ ​this​
+​ 	  }
+​ 	
+​ 	  appendTask(task) {
+​ 	    ​this​.tasks.push(task)
+​ 	    task.project = ​this​
+​ 	  }
+​ 	
+​ 	  firstTask() {
+​ 	    ​return​ ​this​.tasks[0]
+​ 	  }
+​ 	
+​ 	  lastTask() {
+​ 	    ​return​ ​this​.tasks[​this​.tasks.length - 1]
+​ 	  }
+​ 	
+​ 	  swapTasksAt(index1, index2) {
+​ 	    ​const​ temp = ​this​.tasks[index1]
+​ 	    ​this​.tasks[index1] = ​this​.tasks[index2]
+​ 	    ​this​.tasks[index2] = temp
+​ 	    ​new​ ProjectTable(​this​, ​".task-table"​).insert()
+​ 	  }
+​ 	}
+js_jasmine/02/app/javascript/packs/project_loader.js
+​ 	​export​ ​class​ ProjectLoader {
+​ 	  ​constructor​(project) {
+​ 	    ​this​.project = project
+​ 	  }
+​ 	
+​ 	  load() {
+​ 	    ​return​ $.ajax(​this​.ajaxData())
+​ 	  }
+​ 	
+​ 	  ajaxData() {
+​ 	    ​return​ {
+​ 	      url: ​`/projects/​${​this​.project.id}​.js`​,
+​ 	      dataType: ​"json"​
+​ 	    }
+​ 	  }
+​ 	}
+ProjectLoader is a simple class that takes in a Project and makes an Ajax call, which returns a promise. The test double version of that call automatically resolves the promise. When Project#load calls ProjectLoader#load, it looks at that promise, and when it resolves it passes the data to loadFromData—the code is then(data => this.loadFromData(data)). The test double version resolves the promise and passes control to loadFromData. Since Project#load returns the result of the then call, which is itself a promise, the test waits for that promise to resolve (project.load().then(() => {) so that you can verify that the results are as expected.
+
+VERIFYING TEST DOUBLES
+Using test doubles is more than just setting stubbed behaviors to replace real behaviors; test doubles are also used to verify behavior by showing that various methods were called as side effects of the code under test. In RSpec, this verification is done with expect and have_received. In testdouble.js, it’s done with the td.verify method.
+
+There is a side effect in this code. When you move a task up or down, the JavaScript still makes an Ajax call back to the server to register the change server-side. You don’t really care about the result of that call (at least not for the purposes of this test), but you do care that it gets made. So, you can put that validation into the tests by changing the “move up” and “move down” tests.
+
+First some imports at the top of the file:
+
+js_jasmine/03/spec/javascripts/project_spec.js
+​ 	​import​ {Project} ​from​ ​"../../app/javascript/packs/project.js"​
+​ 	​import​ {Task} ​from​ ​"../../app/javascript/packs/task.js"​
+​ 	​import​ {TaskUpdater} ​from​ ​"../../app/javascript/packs/task_updater.js"​
+​ 	​import​ td ​from​ ​"testdouble/dist/testdouble"​
+​ 	​import​ tdJasmine ​from​ ​"testdouble-jasmine"​
+​ 	tdJasmine.use(td)
+Then the changed tests themselves (the two tests here use slightly different validation syntax, which you’ll see more about in a moment):
+
+js_jasmine/03/spec/javascripts/project_spec.js
+​ 	it(​"can move a task up"​, () => {
+​ 	  ​const​ FakeUpdater = td.​constructor​(TaskUpdater)
+​ 	  project.tasks[1].updater = ​new​ FakeUpdater()
+​ 	  project.tasks[1].moveUp()
+​ 	  expect(project.firstTask().name).toEqual(​"Middle Project"​)
+​ 	  expect(project.tasks[1].name).toEqual(​"Start Project"​)
+​ 	  expect(project.lastTask().name).toEqual(​"End Project"​)
+​ 	  td.verify(FakeUpdater.prototype.update(​"up"​))
+​ 	})
+​ 	it(​"can move a task down"​, () => {
+​ 	  ​const​ FakeUpdater = td.​constructor​(TaskUpdater)
+​ 	  project.tasks[1].updater = ​new​ FakeUpdater()
+​ 	  project.tasks[1].moveDown()
+​ 	  expect(project.firstTask().name).toEqual(​"Start Project"​)
+​ 	  expect(project.tasks[1].name).toEqual(​"End Project"​)
+​ 	  expect(project.lastTask().name).toEqual(​"Middle Project"​)
+​ 	  expect().toVerify(FakeUpdater.prototype.update(​"down"​))
+​ 	})
+The beginning of these tests is similar to the td.when tests. You first create a test-double object using td.constructor, then inject it into the real object before calling the method under test.
+
+At the end of the first test, you call td.verify, which does your mock-object verification. The argument to td.verify is almost completely parallel to that of td.when—the argument to td.verify is the exact function call you want to have been made on the test-double object. All of the argument matchers I talked about for td.when can also be included in td.verify.
+
+The second test differs only in that the final line uses expect().toVerify rather than td.verify. The two lines are functionally equivalent. The expect().toVerify version is denied by the testdouble-jasmine package specifically to convince Jasmine that there’s an expectation being tested. If you only use the first version, Jasmine won’t realize that you’re asserting something and will not count it when calculating the number of assertions. To be clear, the td.verify will work; it just won’t create accurate Jasmine metadata.
+
+That test passes. Here’s what Task looks like now:
+
+js_jasmine/03/app/javascript/packs/task.js
+​ 	​import​ {TaskUpdater} ​from​ ​"../../../app/javascript/packs/task_updater.js"​
+​ 	
+​ 	​export​ ​class​ Task {
+​ 	  ​constructor​(name, size, id) {
+​ 	    ​this​.name = name
+​ 	    ​this​.size = size
+​ 	    ​this​.project = ​null​
+​ 	    ​this​.id = id
+​ 	    ​this​.updater = ​new​ TaskUpdater(​this​)
+​ 	  }
+​ 	
+​ 	  index() {
+​ 	    ​return​ ​this​.project.tasks.indexOf(​this​)
+​ 	  }
+​ 	
+​ 	  isFirst() {
+​ 	    ​if​ (​this​.project) {
+​ 	      ​return​ ​this​.project.firstTask() === ​this​
+​ 	    }
+​ 	    ​return​ ​false​
+​ 	  }
+​ 	
+​ 	  isLast() {
+​ 	    ​if​ (​this​.project) {
+​ 	      ​return​ ​this​.project.lastTask() === ​this​
+​ 	    }
+​ 	    ​return​ ​false​
+​ 	  }
+​ 	  moveUp() {
+​ 	    ​if​ (​this​.isFirst()) {
+​ 	      ​return​
+​ 	    }
+​ 	    ​this​.project.swapTasksAt(​this​.index() - 1, ​this​.index())
+​ 	    ​this​.updater.update(​"up"​)
+​ 	  }
+​ 	
+​ 	  moveDown() {
+​ 	    ​if​ (​this​.isLast()) {
+​ 	      ​return​
+​ 	    }
+​ 	    ​this​.project.swapTasksAt(​this​.index(), ​this​.index() + 1)
+​ 	    ​this​.updater.update(​"down"​)
+​ 	  }
+​ 	}
+And here’s the code for TestUpdater:
+
+js_jasmine/03/app/javascript/packs/task_updater.js
+​ 	​export​ ​class​ TaskUpdater {
+​ 	  ​constructor​(task) {
+​ 	    ​this​.task = task
+​ 	  }
+​ 	
+​ 	  update(upOrDown) {
+​ 	    ​const​ url = ​`/tasks/​${​this​.task.id}​/​${upOrDown}​.json`​
+​ 	    $.ajax({
+​ 	      url,
+​ 	      beforeSend: xhr => {
+​ 	        xhr.setRequestHeader(
+​ 	          ​"X-CSRF-Token"​,
+​ 	          $(​'meta[name="csrf-token"]'​).attr(​"content"​)
+​ 	        )
+​ 	      },
+​ 	      data: { _method: ​"PATCH"​ },
+​ 	      type: ​"POST"​
+​ 	    })
+​ 	  }
+​ 	}
+You could unit-test the URL here the way you did before, but it’s covered by the Capybara integration test, so I’m not overly concerned about it.
+
+At this point there’s some JavaScript generating HTML in the files app/javascript/packs/project_table.js and app/javascript/packs/task_row.js, but I won’t go into them in depth. I used jQuery to build up the HTML, which is a bit complicated-looking. In a real app I’d use a framework or a template tool, but I’m reluctant to bring in another tool here, especially one that’s not particularly relevant to testing. In any case, the HTML is also covered by the Capybara integration test.
+
+Speaking of those integration tests, now that you’ve got the JavaScript up and running, let’s see how the running JavaScript affects them.
+
+## Refactoring JavaScript
+By Evan Burchard
+
+Chapter 10. Asynchronous Refactoring
+In this chapter, we’ll discuss asynchronous (aka “async”) programming in JavaScript, by covering the following topics:
+
+Why async?
+Fixing the “pyramid of doom”
+Testing async code
+Promises
+Why Async?
+Before we get into how to make asynchronous JavaScript better through refactoring, it’s worth discussing why we need it. Why shouldn’t we just use a “simpler” synchronous style and not worry about async at all?
+
+As a practical concern, we want our programs to be performant. Despite our focus in this book being interfaces rather than performance, there is another issue, even if we thought it was okay to hold up our whole program for a web request or data processing task that could take seconds, minutes, or even longer: sometimes async is the only option for a given module or library.
+
+Async has become the norm for many APIs. For example, one coming from a mostly synchronous paradigm (language or style) might expect node’s http module to behave like this:
+
+const http = require('http');
+const response = http.get('http://refactoringjs.com');
+console.log(response.body);
+But this will print undefined. The reason is that our response constant is actually named a bit optimistically. The return value of http.get is a ClientRequest object, not a response at all. It describes the request, but not the result.
+
+There are good reasons to use asynchronous remote HTTP calls. If our remote call were synchronous, it would necessarily “stop the world” (STW) and keep our program waiting. Still, when we look at the immediate alternative, this compromise may feel frustratingly complex:
+
+http.get('http://refactoringjs.com', (result) => {
+  result.on('data', (chunk) => {
+    console.log(chunk.toString());
+  });
+});
+WHY TOSTRING()?
+chunk is a Buffer of characters. Try leaving off the toString(), and you’ll see something like <Buffer 3c 21 44 4f 43 ... >.
+
+This is clearly a more complicated process than our idea of how a synchronous HTTP API would function. It forces not only the asynchronous style, but the functional paradigm as well. We have two inner asynchronous functions. If you try to cling to using synchronous-style coding beyond this initial call, your frustration won’t stop:
+
+let theResult = [];
+http.get('http://refactoringjs.com', (result) => {
+  result.on('data', (chunk) => {
+    theResult.push(chunk.toString());
+  });
+});
+console.log(theResult);
+Now we can get an array of the chunks of the response, right? Nope. This prints an empty array: [].
+
+The reason is that the http.get function returns right away, and console.log is evaluated before the chunks are pushed onto the array in the callback. In other words:
+
+http.get('http://refactoringjs.com', (result) => {
+  result.on('data', (chunk) => {
+    console.log('this prints after (also twice)');
+  });
+});
+console.log('this prints first');
+The last line prints before the innermost function has a chance to execute the third line (incidentally, it prints that logging statement twice). So if it’s just a matter of waiting, and we want to do something with the chunks, we should just be able to wait, right? But how long do we wait? Is 500 milliseconds enough time?
+
+let theResult = [];
+http.get('http://refactoringjs.com', (result) => {
+  result.on('data', (chunk) => {
+    theResult.push(chunk.toString());
+  });
+});
+setTimeout(function(){console.log(theResult)}, 500);
+It’s hard to say. Using this approach, we might end up with an empty array, or an array with one or more elements. If we really want to be sure that the data is in place before we log it (or do anything else with it), we’ll end up waiting too much, and tying up our program too. If we wait too little, we’ll miss some data. So this solution isn’t very good. Not only is it unpredictable, but it involves setting state through a side effect.
+
+SETTIMEOUT AND THE EVENT LOOP
+It is worth noting that setTimeout(myFunction, 300) doesn’t necessarily execute myFunction after 300 milliseconds. What it does is first return (in node, if you assign with x = setTimeout(myFunction, 300), you’ll see that it returns a Timeout object), and then add the function to the event loop to be executed after 300 milliseconds has passed.
+
+There are two questions to keep in mind with this type of situation. First, will the event loop be stuck doing something else at 300 milliseconds? Maybe.
+
+Second, does code execute immediately when given a timeout of 0 milliseconds? In other words, what executes first?
+
+setTimeout(() => {console.log('the chicken')}, 0);
+console.log('the egg');
+In this case, "the egg" will get printed first.
+
+What about this?
+
+setTimeout(() => {console.log('the chicken')}, 2);
+setTimeout(() => {console.log('the chicken 2')}, 0);
+setTimeout(() => {console.log('the chicken 3')}, 1);
+setTimeout(() => {console.log('the chicken 4')}, 1);
+setTimeout(() => {console.log('the chicken 5')}, 1);
+setTimeout(() => {console.log('the chicken 6')}, 1);
+setTimeout(() => {console.log('the chicken 7')}, 0);
+setTimeout(() => {console.log('the chicken 8')}, 2);
+console.log('the egg');
+The egg wins again, but the chickens are all over the place. Try running it in different browser consoles and on node. As of this writing, the order on Chrome and Firefox is different but consistent. The order on node varies from run to run.
+
+With the problems of the setTimeout approaches, it looks like we’re better off going back to our first async method (the code snippet directly before “Why toString()?”), but is that really the best way to write it?
+
+Fixing the Pyramid of Doom
+If you’re unfamiliar with the term “pyramid of doom” or the often-related “callback hell,” they can both refer to code in the following form:
+
+levelOne(function(){
+  levelTwo(function(){
+    levelThree(function(){
+      levelFour(function(){
+        // some code here
+      });
+    });
+  });    
+});
+The “pyramid of doom” refers to the shape where code creeps to the right with many levels of indentation. “Callback hell” is less about the shape of the code, and more of a description of code that follows many layers of callback functions.
+
+Extracting Functions into a Containing Object
+Let’s get back to the code from the last section. Clearly, we’re going to want some asynchronous form here, but how do we manage the complexity and nesting required with something like this?
+
+const http = require('http');
+http.get('http://refactoringjs.com', (result) => {
+  result.on('data', (chunk) => {
+    console.log(chunk.toString());
+  });
+});
+Note that this could be much more complicated with many more levels of nesting. This is callback hell and the pyramid of doom in action. There’s no strict line for how much indentation constitutes a pyramid of doom or how many callbacks put you in “hell.”
+
+We already have a strategy for this from previous parts of the book. We simply de-anonymize and extract a function like this:
+
+const http = require('http');
+function printBody(chunk){
+  console.log(chunk.toString());
+};
+
+http.get('http://refactoringjs.com', (result) => {
+  result.on('data', printBody);
+});
+And we could even name and extract another:
+
+const http = require('http');
+function printBody(chunk){
+  console.log(chunk.toString());
+};
+
+function getResults(result){
+  result.on('data', printBody);
+};
+
+http.get('http://refactoringjs.com', getResults);
+Now we’re left with two named functions and the last line as a piece of client or calling code. 
+
+Because this is a streaming API, delivering “chunks” of data rather than the full HTML body at once, our code would currently put a line break between chunks. Let’s avoid that with an array to capture the results:
+
+const http = require('http');
+let bodyArray = [];
+const saveBody = function(chunk){
+  bodyArray.push(chunk);
+};
+const printBody = function(){
+  console.log(bodyArray.join(''))
+};
+const getResults = function(result){
+  result.on('data', saveBody);
+  result.on('end', printBody);
+};
+
+http.get('http://refactoringjs.com', getResults);
+Note that we had to add a new event handler for the 'end' event, and we no longer need the toString because our join function is smart enough to coerce the buffers into one string.
+
+Now that we have extracted our functions and are printing properly, we might be tempted to further change the code by moving this into an object, exporting a module, and defining our public interface by some combination of pseudoprivate functions (prefixed with an underscore), classes, factory functions, or constructor functions. Depending on what you liked from the previous chapters (especially Chapters 5, 6, and 7) and your own style, any of these options might seem overkill or prudent.
+
+If you do decide to move things into an object, one thing to be aware of is how easily the this context will get dropped:
+
+const http = require('http');
+const getBody = {
+  bodyArray: [],
+  saveBody: function(chunk){
+    this.bodyArray.push(chunk);
+  },
+  printBody: function(){
+    console.log(this.bodyArray.join(''))
+  },
+  getResult: function(result){
+    result.on('data', this.saveBody);
+    result.on('end', this.printBody);
+  }
+};
+
+http.get('http://refactoringjs.com', getBody.getResult);
+This code will lead to the following error:
+
+TypeError: "listener" argument must be a function
+This means that in the last line, getBody.getResult is not a function. Changing that last line gets us a bit further:
+
+http.get('http://refactoringjs.com', getBody.getResult.bind(getBody));
+But we still get an error from pushing onto the bodyArray:
+
+TypeError: Cannot read property 'push' of undefined
+To get everything passing around this properly to the callbacks, we’ll need our code to bind this for the callbacks of the events in getResult as well:
+
+const http = require('http');
+const getBody = {
+  bodyArray: [],
+  saveBody: function(chunk){
+    this.bodyArray.push(chunk);
+  },
+  printBody: function(){
+    console.log(this.bodyArray.join(''))
+  },
+  getResult: function(result){
+    result.on('data', this.saveBody.bind(this));
+    result.on('end', this.printBody.bind(this));
+  }
+};
+
+http.get('http://refactoringjs.com', getBody.getResult.bind(getBody));
+Is it worth putting this in an object? Is it worth disabling what was a fairly shallow pyramid of doom? Did we eliminate callback hell? Maybe not, but it’s good to have options. We’ll stick with this form to start the next section.
+
+Before moving on, though, there are two critical things for us to notice.
+
+First, by relying on callbacks to do the real work of our program, we’re also counting on side effects. We’ve left the simple world of returning values. We’re not even just returning values from functions. We’re running them (and returning right away with nothing of value), but the callbacks will run sometime. Our fundamental basis for achieving confidence relies on knowing what’s happening in our code, and async in JavaScript, as we know it so far, completely undermines this.
+
+Second, and related to the first point, we don’t have any tests! But what would we test anyway? Let’s start with our old assumptions about how testing works, and try to test some known value. We know that after the function is executed, the bodyArray should have some data in it. In other words, its length should not be equal to zero.
+
+Testing Our Asynchronous Program
+With that in mind, let’s work with the testing library from Chapter 9 called tape. It is a bit simpler than mocha, and you can run it just by running node whatever-you-call-the-file.js. You can install it with npm install tape.
+
+The following test will fail:
+
+const http = require('http');
+const getBody = {
+...
+}
+const test = require('tape');
+test('our async routine', function(assert){
+  http.get('http://refactoringjs.com',
+           getBody.getResult.bind(getBody));
+  assert.notEqual(getBody.bodyArray.length, 0);
+  assert.end();
+});
+Why? Because it is executed before bodyArray has a chance to be updated!
+
+You might instinctively want to crawl back into a comfortable synchronous world with an update to the test like this:
+
+test('our async routine', function(assert){
+  http.get('http://refactoringjs.com',
+           getBody.getResult.bind(getBody));
+  setTimeout(() => {
+    assert.notEqual(getBody.bodyArray.length, 0);
+    assert.end();
+  }, 3000);
+});
+Here we get a passing test, but it takes 3 seconds to execute.
+
+So how can we delay our assertion until after the bodyArray gets populated?
+
+Because we are testing a side effect, and our code is not very “callback-friendly,” we’re stuck with setTimeout unless we rewrite the code or add some odd machinations to our tests. In an ideal case, printBody would take a callback that would run to indicate that everything is all done.
+
+Trading one blunt tool for another, we can eliminate our reliance on setTimeout by overwriting the existing function that indicates when things are done:
+
+test('our async routine', function (assert) {
+  getBody.printBody = function(){
+    assert.notEqual(getBody.bodyArray.length, 0);
+    assert.end();
+  }
+  http.get('http://refactoringjs.com',
+           getBody.getResult.bind(getBody));
+});
+This might seem outrageous, for a couple of reasons. First, it overwrites a function that we may want to test later (will we have to restore the original implementation?). Second, changes to printBody’s implementation could lead to some complexity later. Without introducing mocking, or trying to feed a callback all the way through each function and event, we could do slightly better:
+
+const getBody = {
+...
+  printBody: function(){
+    console.log(this.bodyArray.join(''))
+    this.allDone();
+  },
+  allDone: function(){}
+}
+
+test('our async routine', function (assert) {
+  getBody.allDone = function(){
+    assert.equal(getBody.bodyArray.length, 2);
+    assert.end();
+  }
+  http.get('http://refactoringjs.com',
+           getBody.getResult.bind(getBody));
+});
+Here, we create a function whose only responsibility is running when printBody runs. Because there is no default implementation, overwriting it for the test is no big deal. We’ll just need to reset it in future tests. Here is an additional test that ensures that setting the bodyArray to [] allows a clean slate:
+
+test('our async routine', function (assert) {
+  getBody.allDone = function(){
+    assert.equal(getBody.bodyArray.length, 2);
+    assert.end();
+  }
+  http.get('http://refactoringjs.com',
+           getBody.getResult.bind(getBody));
+});
+
+test('our async routine two', function (assert) {
+  getBody.bodyArray = [];
+  getBody.allDone = function(){ };
+  http.get('http://refactoringjs.com',
+           getBody.getResult.bind(getBody));
+  assert.equal(getBody.bodyArray.length, 0);
+  assert.end();
+});
+Additional Testing Considerations
+Considering  that we also need to reset our bodyArray to an empty array (and revert any other side effects, such as would appear in a database), one additional upkeep step shouldn’t trouble us too much. We can even refactor these steps into simple functions:
+
+function setup(){
+  getBody.bodyArray = [];
+}
+function teardown(){
+  getBody.allDone = function(){ };
+}
+
+test('our async routine', function (assert) {
+  setup();
+  getBody.allDone = function(){
+    assert.equal(getBody.bodyArray.length, 2);
+    teardown();
+    assert.end();
+  }
+  http.get('http://refactoringjs.com',
+           getBody.getResult.bind(getBody));
+});
+
+test('our async routine two', function (assert) {
+  setup();
+  http.get('http://refactoringjs.com',
+           getBody.getResult.bind(getBody));
+  assert.equal(getBody.bodyArray.length, 0);
+  teardown();
+  assert.end();
+});
+Note that mocha and other more fully featured frameworks try to handle setup and teardown on your behalf. They do okay most of the time, but having explicit setup and teardown functions (as in the last example) gives you more control.
+
+TEST PARALLELIZATION
+No framework will save you from tests running in parallel and clobbering shared state. The solution to this is to run tests that share state serially (as a tape test file will do). And for disparate aspects of the code, splitting these into modules and giving each its own chance to run independently and in parallel will still let you have speedy, parallel test runs.
+
+Architecturally, splitting your code into modules is probably what you wanted to do anyway, right?
+
+If that sounds like too much work, go with mocha or something else that handles setup/teardown. But don’t be surprised if you still have an occasional parallelization problem (most likely resulting in test failures).
+
+Let’s take care of that function reassignment using the testdouble library (npm install testdouble):
+
+const testDouble = require('testdouble');
+
+function setup(){
+  getBody.bodyArray = [];
+}
+function teardown(){
+  getBody.allDone = function(){ };
+}
+test('our async routine', function (assert) {
+  getBody.allDone = testDouble.function();
+  testDouble.when(getBody.allDone()).thenDo(function(){
+    assert.notEqual(getBody.bodyArray.length, 0)
+    assert.end()
+  });
+  http.get('http://refactoringjs.com',
+           getBody.getResult.bind(getBody));
+});
+When we make a test double like this for our function (we could also do it for whole objects), our code can now just “fake” the call to allDone. More typically, doubles are used to avoid performing expensive or otherwise slow operations (such as calling an external API), but be wary of using this technique too much, as it is possible to fake everything, which results in useless tests. One thing to notice is how convenient our teardown is. It’s easy to reassign this one empty function, but if we were creating doubles of more functions (mocking, stubbing, spying, etc.), our teardown could get pretty complicated.
+
+How about this for isolation?
+
+function setup(){
+  return Object.create(getBody);
+};
+
+test('our async routine', function (assert) {
+  const newBody = setup();
+  newBody.allDone = testDouble.function();
+  testDouble.when(newBody.allDone()).thenDo(function(){
+    assert.notEqual(newBody.bodyArray.length, 0)
+    assert.end()
+  });
+  http.get('http://refactoringjs.com',
+           newBody.getResult.bind(newBody));
+});
+Instead of having to reset our object, we can just use a new one with our test runs. Our setup function might not be specific enough for every situation, but it’s perfect for this.
+
+DID WE TEST ENOUGH?
+Depending on our confidence, we can pretty much always add more tests. In this case, we might have opted to return the HTML string from printBody and test that (probably with a regex rather than a full match). We could have made a double for this call:
+
+result.on('data', this.saveBody.bind(this));
+And made it always produce a simple HTML fragment.
+
+Additionally, we could test the fact that a function was called at all, or that it was called and did not produce an error.
+
+In a lot of asynchronous code, the return values are not as interesting (or confidence-producing) as knowing what functions were called and what other side effects took place.
+
+In this section, we created objects and explored some lightweight testing options for asynchronous code. You might lean toward heavier tools like mocha (as we used earlier) for testing and Sinon.JS (which we haven’t looked at) for doubles. Or you might try out simpler tools like tape and testdouble. You might even want to just scrape by with setTimeout and assert or wish statements from time to time.
+
+As we discussed in Chapter 3, you have many options for tooling and testing. If something feels overly complex or doesn’t do what you need it to, you can always tool down or tool up as needed. Flexibility and clarity are more important than hitting a screw with a hammer until it drives into the wall.
+
+Callbacks and Testing
+From the last section, we have a new approach to fixing the pyramid of doom, but it doesn’t really get us out of callback hell. In fact, by naming and extracting functions, we may actually reduce the clarity of our code in some cases. Rather than callbacks being nested, they could be spread across the file or multiple files.
+
+Creating an object helped with keeping callbacks somewhat organized, but that isn’t our only option. Part of what led us to that solution was the utility of having a container to store our side effect array. We had to do some aggregation based on the streaming/event-emitting nature of node’s http library and our desire to print the entire HTML body at once. If we were adding something to a page or saving a file, we might consider allowing the file or DOM to be the aggregate itself, and just pass the results of the stream to it instead of getting them into an intermediate form (the array).
+
+We’ve seen that passing a (callback) function into another function is useful for asynchronous programming, but it completely changes how we’ve been working in the earlier parts of this book. Instead of returning something valuable and acting on it, we’re letting the inner function call the shots (and its inner function [and its inner function]). This is a property of continuation passing style (CPS) called inversion of control (IoC), and while useful, it has some drawbacks:
+
+It’s confusing. You have to think backward until you get used to it.
+It makes function signatures complex. Instead of function parameters acting as “inputs,” they now may be responsible for outputs as well.
+Callback hell and the pyramid of doom are both likely without organizing code into objects or other high-level containers.
+Error handling is more complicated.
+Additionally, asynchronous code in general is hard:
+
+It makes testing more difficult (although part of this is just the nature of asynchronous programming).
+It’s hard to mix with synchronous code.
+Return values are likely no longer important throughout the sequence of callbacks. This makes us rely on testing of callback arguments to determine intermediate values.
+Basic CPS and IoC
+Let’s look at an example of the most basic usage of callbacks in a function, simply to see this inversion of control in action. It doesn’t even have to be asynchronous. Here’s an example of a noncallback (aka “direct style”) version of our function:
+
+function addOne(addend){
+  console.log(addend + 1);
+};
+addOne(2);
+And when we use callbacks to do the same thing:
+
+function two(callback){
+  callback(2);
+};
+two((addend) => console.log(addend + 1));
+The weight of the algorithm is now in the callback, rather than the two function, which merely gives up control and passes a 2 to the callback. As we have done before, we can name and extract the anonymous function, giving us this:
+
+function two(callback){
+  callback(2);
+};
+function addOne(addend){
+  console.log(addend + 1);
+};
+two(addOne);
+The value of the calling function (two) is that it supplies a variable to the callback. In this case, that is all it does. If the two function needed its value to come from some longer-running task, we’d want a callback (CPS) version. However, because two can immediately return, the direct style is fine, if not preferable.
+
+Let’s add a three function that does need to work asynchronously:
+
+function three(callback){
+  setTimeout(function(){
+    callback(3);
+    },
+  500);
+};
+three(addOne);
+If we tried doing the same synchronously:
+
+function three(){
+  setTimeout(function(){
+    return 3
+    },
+    500);
+}
+function addOne(addend){
+  console.log(addend + 1);
+};
+addOne(three());
+We end up printing NaN (“Not a Number”) because addOne finishes executing before three gets a chance to return. In other words, we’re trying to add 1 to undefined (the addend in addOne), resulting in NaN. So we’ll need to go back to our previous version:
+
+function addOne(addend){
+  console.log(addend + 1);
+};
+function three(callback){
+  setTimeout(function(){
+    callback(3);
+    },
+  500);
+};
+three(addOne);
+Note that we could also have written our addOne function to take a callback, like this:
+
+function addOne(addend, callback){
+  callback(addend + 1);
+};
+function three(callback){
+  setTimeout(function(){
+    callback(3, console.log);
+    },
+    500);
+};
+three(addOne);
+Let’s stick with this form for the tests.
+
+Callback Style Testing
+The example from the last section might seem redundant with our earlier use of the http.get function, but there are four reasons we introduced it:
+
+The motivation in the first part of this chapter was the need to work with an asynchronous library. In this example, the motivation is that we need to work with an asynchronous function (just one).
+The earlier example is more complex because the callback of get leads to other callbacks in multiple result.on functions.
+Our earlier example did not use CPS the whole way through. We relied on a nonlocal object to do some of the dirty work.
+A simple example, where we write both the interface and the implementation code, is needed because we’ll increase the complexity when we introduce promises.
+Before we get to promises, we need tests for this code. Earlier, we cheated a bit by relying on a global variable for the value we were testing. We could do the same here, or rely on some kind of test double for console.log to check if it is called with the right argument (a viable approach for an end-to-end test), but that’s not where we’re headed. This time, we’ll try doing things a bit more async-like by relying only on the resulting parameters from our callbacks. Since addOne is simpler, let’s start there:
+
+const test = require('tape');
+
+test('our addOne function', (assert) => {
+  addOne(3, (result) => {
+    assert.equal(result, 4);
+    assert.end();
+  });
+});
+For the sake of testing, we’re basically treating result like we would a return value. Instead of testing the return value, we’re testing the parameter that is passed to the callback. As for reading this, we could say this:
+
+addOne takes two arguments: a number and a callback.
+We’re passing in a callback as the second (actual) argument. It is an anonymous function.
+That anonymous function has a (formal) parameter we call result. We are declaring the function in the test.
+That anonymous function is called inside of addOne, with the argument (result) being the addition of 1 and whatever was passed as the first argument to addOne.
+We test that result against the numerical literal 4.
+We end the test.
+Look at how different the addOne function and its test would be if we were just returning the result:
+
+function addOneSync(addend){
+  return addend + 1;
+};
+...
+test('our addOneSync function', (assert) => {
+  assert.equal(addOneSync(3), 4);
+  assert.end();
+});
+Here we:
+
+Pass 3 to the addOne function and get the return value.
+Test that return value against the numerical literal 4.
+End the test.
+One of those processes is way simpler, but we’re living in an async world a lot of the time. Also, as we saw earlier, our three function doesn’t have the luxury of having a usable synchronous analog. Here is our test:
+
+test('our three function', (assert) => {
+  three((result, callback) => {
+    assert.equal(result, 3);
+    assert.equal(callback, console.log);
+  });
+  assert.end();
+});
+The three function takes only one argument. That is a function, which we’ve left anonymous. That anonymous function takes two parameters, which are supplied as arguments when the anonymous function is called inside of three. One is the result and the other is the callback. Our tests confirm that result is 3 and callback is console.log.
+
+If we want an end-to-end test, our best bet is using the testdouble library to see if console.log is called with 4:
+
+const testDouble = require('testdouble');
+test('our end-to-end test', (assert) => {
+  testDouble.replace(console, 'log')
+  three((result, callback) => {
+    addOne(result, callback)
+    testDouble.verify(console.log(4));
+    testDouble.reset();
+    assert.end();
+  });
+});
+There are a couple of things worth noting here. First, the testdouble.replace function replaces the console.log function with a double that we can check later when we call verify. Following that, testdouble.reset restores console.log to its former self. Recall earlier when we were talking about creating a teardown function. We could use testdouble.reset to put our doubles back, meaning that after we do that, we could use console.log as normal.
+
+So now that we have tests in place, let’s get to promisifying.
+
+Promises
+If you like being able to write asynchronous JavaScript, but don’t like the mess that comes along with inversion of control, promises are for you. Let’s recap what we’ve seen so far. In direct style, you return values from functions and use those return values in other functions. In CPS (continuation passing style), you invert control by the calling code supplying (and often defining inline) a callback to be executed by the function that is called. Return values become little better than meaningless, and instead the arguments passed from the callback (one is conventionally called result) become the focus of tests and subsequent callbacks.
+
+Although using callbacks opens up the possibility of asynchronous code (without using some kind of polling), we introduce some complexity both in the way we structure our functions and in the way we call them.
+
+Promises shift this complexity to the function definition side of things, leaving the function calling code with a relatively simple API. For most situations, promises are a better choice than CPS. And where they aren’t the right choice, CPS probably isn’t either. In those cases, you might be looking for stream handling, observables, or some other high-level pattern.
+
+The Basic Promise Interface
+So how do we use promises? We’ll cover their implementation soon, but for now, let’s see what the promise interface looks like:
+
+// promises
+four()
+.then(addOne)
+.then(console.log);
+This is pretty straightforward. We have a function that returns a 4 (wrapped in a promise), acted on by addOne (which itself returns a promise), which in turn is acted on by console.log.
+
+If we’re looking to compose functions, promises are much easier to work with. Callbacks have us stuck either hardcoding function names (and/or function literals for callbacks) in the function declarations, passing them in as extra parameters in the function, or using some other nontrivial and somewhat confusing alternatives.
+
+With promises, we are just chaining values together. We have a value (wrapped in a promise), and then unwraps it by waiting (when necessary), then passes that value as a parameter to the promise or function. To illustrate a bit more of the interface, we could also write form 2:
+
+// form 1
+four()
+.then(addOne)
+.then(console.log);
+
+// form 2
+four()
+.then((valueFromFour) => addOne(valueFromFour))
+.then((valueFromAddOne) => console.log(valueFromAddOne));
+In these forms, we have a function literal or reference. Both the function definitions and the function calls of addOne and console.log happen elsewhere. Form 1 is preferable when possible (it is also known as “point-free,” a style we’ll discuss more in the next chapter).
+
+Moving from form 2 to form 1 has a similar feel to naming and extracting an anonymous function. In both cases, the function calls happen elsewhere, and may even be implicit or outside of your codebase (i.e., you won’t be able to “grep” for them). In the case of moving from form 2 to form 1, however, the function definitions (along with their names) already exist, so we only need to drop the anonymous wrapping function.
+
+THE FLEXIBILITY OF PROMISES
+If you’re still not sure about the utility of promises over callbacks, take a look at this:
+
+four()
+.then(addOne)
+.then(addOne)
+.then(addOne)
+.then(addOne)
+.then(addOne)
+.then(console.log);
+We can chain as many addOnes as we want. It’s basically a fluent interface if you ignore the then calls, and it’s async-friendly. You can do this with CPS, but you’re headed for the pyramid of doom (and hard-to-test intermediate results).
+
+Creating and Using Promises
+Now that we have a good idea of why promises are often a good choice over callbacks, let’s take a look at how we actually implement them:
+
+four()
+.then(addOne)
+.then(console.log);
+
+function addOne(addend){
+  return Promise.resolve(addend + 1);
+};
+
+function four(){
+  return new Promise((resolve, _reject) => {
+    setTimeout(() => resolve(4), 500);
+  });
+};
+The first three lines should be very familiar by now. So how do the new functions work? It might seem complex inside the function bodies, but notice that we’re no longer passing callbacks, which can get very confusing. Also, we get our return statements back!
+
+Unfortunately, what we are returning are promises, which may seem hard to understand. But they aren’t. It’s just like making toast:
+
+You start with a toaster.
+You put your bread in it along with some input on how to toast it.
+The toaster determines when the bread is toasty enough and pops it up.
+After it’s ready, you get your toast and consume it how you see fit.
+The same four steps are true of promises:
+
+You start with a promise (usually created with new Promise, but the previous example also shows that you can create one with Promise.resolve).
+You put a value or the process to create a value (which may be asynchronous) into the promise.
+After a timer or receiving the result of some asynchronous function, the value is set by resolve(someValue).
+This value is returned wrapped in a promise. You pull it out of the toaster—er, promise—with the then function, and consume the value as you see fit.
+DO YOU HATE METAPHORS?
+No? Good. We’ll be discussing burritos in Chapter 11. They’re kind of like making toast.
+
+But isn’t a promise a high-level functional structure like a functor or monad or similar? Maybe, but that’s a huge topic, and we can’t get into all of it in this book. Chapter 11 gives a good introduction to practical functional coding, but we’ll leave the theory out of it and focus on using good coding interfaces.
+
+Back to our example, our addOne function returns a promise created with Promise.resolve(addend + 1). This is fine for cases where we only need a value, but using the new Promise constructor function and supplying a callback (the executor) that calls resolve or reject (the two functions named by the signature of the callback of the constructor, the executor) provides more flexibility.
+
+SOME CONSIDERATIONS ABOUT THEN
+There is something to note about our addOne function:
+
+function addOne(addend){
+  return Promise.resolve(addend + 1);
+}
+It would work just as well if the second line were this:
+
+  return addend + 1;
+Why? Because then will accept a promise or a function (or two, actually: the first for fulfillment and the second for rejection). Try this:
+
+four()
+.then(() => 6)
+.then(console.log);
+In this case, 6 will be printed. The first then’s callback throws away the 4 and just passes 6 along.
+
+However, note that four cannot be a simple function returning a simple value, even without considering the setTimeout aspect of it. The first function in a promise chain must be “then-able”—that is, return an object that supports the .then(fulfillment, rejection) interface. That said, you could start off just by having a resolved promise:
+
+Promise.resolve()
+.then(() => 4)
+.then(() => 6)
+.then(console.log);
+A resolve will make the value available inside of the then function. The reject function will create a rejected promise object. There is a catch function that will catch some errors (and miss others, so be careful). There are also Promise.all and Promise.race functions to, respectively, return when all promises complete and return the first promise that completes.
+
+In some ways, it is a fairly small API, but the variations around error handling and setting promises up can make for a tricky experience. Still, the interface it provides makes the upfront work worth it.
+
+Testing Promises
+To finish things up neatly, let’s see how the tests adapt to this new interface:
+
+function addOne(addend){
+  return Promise.resolve(addend + 1);
+}
+
+function four(){
+  return new Promise((resolve, _reject) => {
+    setTimeout(() => resolve(4), 500);
+  })
+}
+
+const test = require('tape');
+const testdouble = require('testdouble');
+
+test('our addOne function', (assert) => {
+  addOne(3).then((result) => {
+    assert.equal(result, 4);
+    assert.end();
+  });
+});
+
+test('our four function', (assert) => {
+  four().then((result) => {
+    assert.equal(result, 4);
+    assert.end();
+  });
+});
+
+test('our end-to-end test', (assert) => {
+  testdouble.replace(console, 'log')
+  four()
+  .then(addOne)
+  .then(console.log)
+  .then(() => {
+    testdouble.verify(console.log(5));
+    assert.pass();
+    testdouble.reset();
+    assert.end();
+  }).catch((e) => {
+    testdouble.reset();
+    console.log(e);
+  })
+});
+The first two tests, which are low-level, are relatively unchanged. The end-to-end test has changed quite a bit. After replacing console.log so that we can monitor it, we kick off the promise chain with our promise-returning four function. We chain our addOne and console.log callbacks with then functions. And then we have another then, with an anonymous function as the only argument. Inside of that anonymous function, we verify that console.log was called with 5. Following that, we call assert.pass so that our test output will confirm three instead of two passing tests. We need that because verify isn’t part of tape and doesn’t produce a passing assertion. Then we do the teardown with testdouble.reset and assert.end.
+
+You might be wondering what we’re doing with the catch. Well, unfortunately, after we replace console.log, our errors will no longer print anything! catch allows us to put console.log back with testdouble.replace before printing the error with console.log(e).
+
+IS CHANGING CALLBACK-STYLE CODE INTO PROMISES “REFACTORING?”
+Probably not, unless you aren’t concerned with unit testing at all and consider your “interface” to be some very high-level interactions with the code. The value in promises is that they change interfaces, and those are probably where you would want your testing to be.
+
+So why spend so much time on promises in Refactoring JavaScript?
+
+There are three reasons. First, you’ll probably hear someone at some point talk about “refactoring to use promises.” You’ll know this actually means supporting new interfaces, and writing new code with new tests. See the diagram in Chapter 5 on what tests to write (Figure 5-1). The second reason is that knowing where you are in the testing cycle (testing before new code, increasing coverage, or refactoring) is the most important thing to have a handle on when developing confidence in a codebase. Third, there are tons of cool things in JavaScript (canvas, webvr, webgl, etc.)  that make somewhat niche applications possible, but asynchronous programming with promises is increasingly important for JavaScript developers of all kinds.
+
+Wrapping Up
+Async is a huge and  active area of development in JavaScript, and we only scratched the surface. Other things worth exploring are web workers, streams, observables, generators, async/await, and nonnative async/promise utilities.
+
+For the most part, using any of these features will involve dramatically changing code and not refactoring as we define it. But having a base knowledge of the interfaces involved  in your code, as well as how to test them, is crucial before any refactoring can take place.
+
+Despite “refactoring to use promises” not really fitting our concept of refactoring, the interface is one that we should prefer (at least until async and await become more widely available), because it generates useful return values rather than relying on calling other functions (side effects). By the same token, async and await are interesting because they allow us to write synchronous-looking code just by adding a few keywords. However, as of this writing, their spec and implementations are not yet realized.
+
+In Design Patterns: Elements of Reusable Object-Oriented Software, the Gang of Four’s advice to “code to an interface, not an implementation” must be predicated on the capacity to choose what interface you want. Following that, you can develop confidence through writing tests and refactoring. Here, we’ve explored a few more options for interfaces.
